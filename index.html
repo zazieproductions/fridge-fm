@@ -1,0 +1,784 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FRIDGE FM — Experimental Cryo-Acoustic Synthesizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/src/styles.css">
+    <style>
+        :root {
+            --mint-light: #e0f5ed;
+            --mint-base: #9fe2bf;
+            --mint-mid: #6ec49c;
+            --mint-dark: #2c6e52;
+            --mint-deep: #133829;
+            --chrome-light: #ffffff;
+            --chrome-mid: #cbd5e1;
+            --chrome-dark: #475569;
+            --cyan-glow: #00f5ff;
+            --amber-warm: #ff9e00;
+            --panel-bg: #111c18;
+        }
+
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background: radial-gradient(circle at 50% 20%, #1d352d 0%, #09120f 70%, #050807 100%);
+            color: #e2f1eb;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .font-display { font-family: 'Syne', sans-serif; }
+        .font-mono-tech { font-family: 'DM Mono', monospace; }
+
+        /* Retro Enamel & Chrome Textures */
+        .enamel-mint {
+            background: linear-gradient(145deg, #b8f2d6 0%, #86d3af 45%, #5ab38b 100%);
+            box-shadow: 
+                inset 3px 3px 8px rgba(255, 255, 255, 0.7),
+                inset -4px -4px 12px rgba(20, 65, 45, 0.5),
+                0 20px 50px rgba(0, 0, 0, 0.8),
+                0 0 0 2px #3c8c69;
+        }
+
+        .enamel-dark {
+            background: linear-gradient(160deg, #1b2e26 0%, #0f1b16 100%);
+            box-shadow: 
+                inset 2px 2px 5px rgba(255,255,255,0.06),
+                inset -3px -3px 8px rgba(0,0,0,0.8),
+                0 8px 20px rgba(0,0,0,0.5);
+            border: 1px solid rgba(159, 226, 191, 0.15);
+        }
+
+        .chrome-trim {
+            background: linear-gradient(180deg, #f8fafc 0%, #94a3b8 25%, #ffffff 50%, #475569 80%, #cbd5e1 100%);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.5), inset 0 1px 1px #fff;
+            border: 1px solid #64748b;
+        }
+
+        .chrome-handle {
+            background: linear-gradient(90deg, #e2e8f0 0%, #ffffff 35%, #64748b 75%, #cbd5e1 100%);
+            box-shadow: 
+                -6px 8px 16px rgba(0,0,0,0.6),
+                inset 2px 2px 3px #ffffff,
+                inset -2px -2px 4px #334155;
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+        }
+        .chrome-handle:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: -8px 12px 20px rgba(0, 245, 255, 0.25), inset 2px 2px 4px #fff;
+        }
+        .chrome-handle:active {
+            transform: translateY(1px) scale(0.98);
+        }
+
+        /* Freezer & Fridge Interior Compartments */
+        .freezer-bay {
+            background: radial-gradient(circle at 50% 30%, rgba(0, 245, 255, 0.22) 0%, rgba(12, 45, 62, 0.85) 60%, #071921 100%);
+            box-shadow: inset 0 0 35px rgba(0, 245, 255, 0.35), inset 0 4px 12px rgba(0,0,0,0.8);
+            border: 2px solid rgba(165, 243, 252, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .fridge-interior {
+            background: radial-gradient(circle at 50% 15%, var(--fridge-light-color, rgba(255, 214, 138, 0.28)) 0%, rgba(20, 48, 42, 0.92) 55%, #0a1814 100%);
+            box-shadow: inset 0 10px 40px rgba(0, 0, 0, 0.85), inset 0 0 25px var(--fridge-glow, rgba(255, 185, 60, 0.2));
+            border: 3px solid #2b4c3f;
+            transition: background 0.4s ease, box-shadow 0.4s ease;
+        }
+
+        .glass-shelf {
+            background: linear-gradient(90deg, rgba(165, 243, 252, 0.15) 0%, rgba(255, 255, 255, 0.35) 50%, rgba(165, 243, 252, 0.15) 100%);
+            height: 8px;
+            border-top: 2px solid rgba(255, 255, 255, 0.65);
+            border-bottom: 2px solid rgba(6, 182, 212, 0.4);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.5), 0 0 12px rgba(0, 245, 255, 0.2);
+        }
+
+        /* Frost & Door Overlay */
+        .fridge-door-cover {
+            position: absolute;
+            inset: 0;
+            z-index: 30;
+            border-radius: 1.5rem;
+            transition: transform 0.75s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.5s ease;
+            transform-origin: left center;
+            backface-visibility: hidden;
+        }
+
+        .door-open {
+            transform: perspective(1400px) rotateY(-105deg) translateX(-15px);
+            opacity: 0.12;
+            pointer-events: none;
+        }
+
+        /* Custom Rotary Knob */
+        .knob-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: ns-resize;
+        }
+        .knob-dial {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: conic-gradient(from 180deg, #1e293b, #475569, #0f172a, #334155, #1e293b);
+            box-shadow: 
+                0 5px 10px rgba(0,0,0,0.6),
+                inset 0 2px 2px rgba(255,255,255,0.3),
+                0 0 0 3px #0f1b16;
+            position: relative;
+            transition: box-shadow 0.15s ease;
+        }
+        .knob-wrapper:hover .knob-dial {
+            box-shadow: 0 5px 12px rgba(0,245,255,0.3), inset 0 2px 2px rgba(255,255,255,0.4), 0 0 0 3px #00f5ff55;
+        }
+        .knob-indicator {
+            position: absolute;
+            top: 5px;
+            left: 50%;
+            width: 3px;
+            height: 13px;
+            margin-left: -1.5px;
+            background: var(--cyan-glow);
+            border-radius: 2px;
+            box-shadow: 0 0 6px var(--cyan-glow);
+            transform-origin: center 19px;
+        }
+
+        /* Animations */
+        @keyframes fridgeShake {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            15% { transform: translate(-8px, -4px) rotate(-1.5deg); }
+            30% { transform: translate(7px, 3px) rotate(1.5deg); }
+            45% { transform: translate(-6px, 5px) rotate(-1deg); }
+            60% { transform: translate(6px, -3px) rotate(1.2deg); }
+            75% { transform: translate(-4px, 2px) rotate(-0.8deg); }
+        }
+        .shake-anim {
+            animation: fridgeShake 0.55s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+        }
+
+        @keyframes compressorPulse {
+            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(255, 140, 0, 0.4)); }
+            50% { transform: scale(1.03); filter: drop-shadow(0 0 15px rgba(255, 90, 0, 0.8)); }
+        }
+        .compressor-active {
+            animation: compressorPulse 0.18s infinite ease-in-out;
+        }
+
+        @keyframes floatIce {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-3px) rotate(2deg); }
+        }
+        .ice-cube {
+            background: linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(165,243,252,0.45) 45%, rgba(6,182,212,0.65) 100%);
+            box-shadow: 
+                inset 2px 2px 5px rgba(255,255,255,0.9),
+                inset -2px -2px 6px rgba(0, 140, 255, 0.5),
+                0 4px 12px rgba(0, 245, 255, 0.3);
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255,255,255,0.8);
+            transition: all 0.15s ease;
+        }
+        .ice-cube:hover {
+            transform: scale(1.09) rotate(-3deg);
+            box-shadow: 0 0 18px #00f5ff, inset 0 0 8px #fff;
+        }
+        .ice-cube:active {
+            transform: scale(0.92);
+        }
+
+        /* Bottle Styling */
+        .glass-bottle {
+            cursor: ns-resize;
+            transition: filter 0.15s ease, transform 0.15s ease;
+        }
+        .glass-bottle:hover {
+            filter: drop-shadow(0 0 10px rgba(0, 245, 255, 0.7));
+            transform: translateY(-2px);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #09120f; }
+        ::-webkit-scrollbar-thumb { background: #2c6e52; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00f5ff; }
+
+        /* Piano Key Active States */
+        .synth-key {
+            transition: all 0.08s ease;
+        }
+        .synth-key.key-active {
+            background: linear-gradient(180deg, #00f5ff 0%, #0284c7 100%) !important;
+            color: #04131a !important;
+            transform: translateY(2px);
+            box-shadow: 0 0 18px rgba(0, 245, 255, 0.8) !important;
+        }
+    </style>
+</head>
+<body class="p-3 md:p-6 select-none">
+
+    <!-- AUDIO BOOT OVERLAY -->
+    <div id="bootOverlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md transition-opacity duration-500">
+        <div class="enamel-mint p-1 rounded-3xl max-w-lg w-full mx-4 shadow-2xl">
+            <div class="bg-[#0d1915] rounded-[22px] p-8 text-center border border-emerald-400/30 relative overflow-hidden">
+                <div class="absolute -top-20 -left-20 w-48 h-48 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute -bottom-20 -right-20 w-48 h-48 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none"></div>
+                
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/90 border border-emerald-400/40 text-emerald-300 font-mono-tech text-xs mb-4">
+                    <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+                    MODEL 1958-DSP // CRYO-ACOUSTIC LAB
+                </div>
+                
+                <h1 class="font-display text-4xl md:text-5xl font-extrabold tracking-tight text-white mb-2">
+                    FRIDGE <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 via-cyan-300 to-teal-200">FM</span>
+                </h1>
+                <p class="text-emerald-200/80 text-sm mb-6 leading-relaxed">
+                    An experimental electroacoustic synthesizer disguised as a vintage mint-enamel refrigerator. Real-time AudioWorklet &amp; Web Audio DSP: FM motors, modal glass bottles, crystalline granular ice, and 24-bit WAV studio export.
+                </p>
+
+                <button id="powerOnBtn" class="w-full py-4 px-6 rounded-xl font-display font-bold text-lg tracking-wider text-slate-950 bg-gradient-to-r from-emerald-300 via-cyan-300 to-emerald-400 hover:from-white hover:to-cyan-200 shadow-[0_0_30px_rgba(0,245,255,0.5)] transition-all transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+                    PLUG IN &amp; OPEN REFRIGERATOR
+                </button>
+                <div class="mt-4 flex justify-center gap-6 text-[11px] font-mono-tech text-emerald-400/70">
+                    <span>• ZERO SAMPLES</span>
+                    <span>• 100% REAL-TIME DSP</span>
+                    <span>• 16/24/32-BIT WAV</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOP HEADER BAR -->
+    <header class="max-w-[1600px] mx-auto mb-5 flex flex-wrap items-center justify-between gap-4 enamel-dark px-5 py-3.5 rounded-2xl border border-emerald-500/25">
+        <div class="flex items-center gap-4">
+            <div class="chrome-trim px-4 py-1.5 rounded-lg flex items-center gap-2 shadow-md">
+                <span class="w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_8px_#00f5ff]"></span>
+                <span class="font-display font-extrabold text-slate-900 tracking-wider text-xl">FRIDGE FM</span>
+            </div>
+            <div class="hidden sm:block">
+                <div class="text-xs font-mono-tech text-emerald-300/90 flex items-center gap-2">
+                    <span>THERMO-SONIC SYNTHESIZER</span>
+                    <span class="px-2 py-0.5 bg-emerald-950 border border-emerald-500/30 rounded text-[10px] text-cyan-300" id="audioStatusBadge">ENGINE STANDBY</span>
+                </div>
+                <div class="text-[11px] text-emerald-400/60 font-mono-tech" id="statusMessage">Click any refrigerator component or press keys [A-L] to synthesize</div>
+            </div>
+        </div>
+
+        <!-- MASTER THERMOSTAT & TELEMETRY -->
+        <div class="flex flex-wrap items-center gap-4 md:gap-6">
+            <!-- Thermostat Slider -->
+            <div class="flex items-center gap-3 bg-black/40 px-4 py-2 rounded-xl border border-cyan-500/20">
+                <div class="text-right">
+                    <div class="text-[10px] font-mono-tech uppercase tracking-wider text-emerald-400/80">Thermostat</div>
+                    <div id="tempReadout" class="font-mono-tech font-bold text-sm text-cyan-300">-4.2 °C (CHILLED)</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-amber-400 font-mono-tech" title="Warm Analog Drift">🔥</span>
+                    <input id="thermostatSlider" type="range" min="0" max="100" value="62" class="w-28 md:w-36 accent-cyan-400 cursor-pointer">
+                    <span class="text-xs text-cyan-300 font-mono-tech" title="Cryogenic Crystalline">❄️</span>
+                </div>
+            </div>
+
+            <!-- Seeded PRNG Box -->
+            <div class="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+                <span class="text-[10px] font-mono-tech text-emerald-400/80">SEED:</span>
+                <input id="seedInput" type="text" value="CRYO-1958" class="bg-emerald-950/90 text-cyan-300 font-mono-tech text-xs px-2 py-1 rounded w-24 border border-emerald-500/30 focus:outline-none focus:border-cyan-400">
+                <button id="applySeedBtn" class="px-2.5 py-1 bg-emerald-800/60 hover:bg-emerald-600 text-xs font-mono-tech rounded text-white transition" title="Generate reproducible patch from Seed">SYNC</button>
+            </div>
+
+            <!-- Master Volume -->
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-mono-tech text-emerald-300">VOL</span>
+                <input id="masterGainSlider" type="range" min="0" max="100" value="80" class="w-20 accent-emerald-400 cursor-pointer">
+                <button id="panicMuteBtn" class="px-2.5 py-1 rounded bg-rose-950/80 hover:bg-rose-700 text-rose-200 border border-rose-500/40 text-xs font-mono-tech transition" title="Kill all active voices">SILENCE</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN 3-COLUMN WORKSPACE -->
+    <main class="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+        <!-- LEFT COLUMN: INTERACTIVE RETRO REFRIGERATOR (5 COLS) -->
+        <section class="lg:col-span-5 flex flex-col items-center">
+            <!-- THE FRIDGE CHASSIS -->
+            <div id="fridgeChassis" class="w-full max-w-[540px] enamel-mint rounded-[42px] p-4 sm:p-5 relative transition-all duration-300">
+                
+                <!-- Top Vintage Chrome Badge -->
+                <div class="flex justify-between items-center mb-3 px-4">
+                    <div class="flex items-center gap-2">
+                        <span id="doorStateIndicator" class="w-2.5 h-2.5 rounded-full bg-emerald-900 border border-white/50"></span>
+                        <span id="doorStateText" class="font-mono-tech text-[11px] font-bold text-emerald-950 tracking-wider">DOOR OPEN // DIRECT ACOUSTICS</span>
+                    </div>
+                    <div class="chrome-trim px-3 py-0.5 rounded-full text-[10px] font-display font-extrabold text-slate-900 tracking-widest shadow">
+                        KELVINATOR-FM
+                    </div>
+                    <button id="toggleDoorBtn" class="px-3 py-1 rounded-full bg-emerald-950 text-emerald-200 hover:bg-slate-900 hover:text-cyan-300 font-mono-tech text-xs font-medium shadow transition flex items-center gap-1.5 cursor-pointer">
+                        <span>🚪</span> <span id="doorBtnLabel">CLOSE DOOR</span>
+                    </button>
+                </div>
+
+                <!-- REFRIGERATOR INNER CAVITY WRAPPER -->
+                <div class="relative rounded-[28px] p-3 fridge-interior" id="fridgeCavity">
+
+                    <!-- CLOSED DOOR OVERLAY (Muffled Filter State when shut) -->
+                    <div id="closedDoorOverlay" class="fridge-door-cover enamel-mint door-open flex flex-col justify-between p-8 border-4 border-emerald-200/60 shadow-2xl">
+                        <div class="mt-6 text-center">
+                            <div class="chrome-trim inline-block px-8 py-2 rounded-xl shadow-lg mb-2">
+                                <span class="font-display font-extrabold text-2xl tracking-widest text-slate-800">FRIDGE FM</span>
+                            </div>
+                            <p class="font-mono-tech text-xs text-emerald-950 font-semibold tracking-widest uppercase">Cryogenic Harmonic Preserver</p>
+                        </div>
+
+                        <!-- Exterior Vintage Handle -->
+                        <div class="my-auto flex justify-end pr-2">
+                            <button id="exteriorHandleBtn" class="chrome-handle w-8 h-48 rounded-full cursor-pointer flex items-center justify-center pointer-events-auto" title="Pull Handle to Open Door">
+                                <span class="w-1.5 h-24 rounded-full bg-slate-600/40"></span>
+                            </button>
+                        </div>
+
+                        <div class="bg-emerald-950/85 backdrop-blur-md p-4 rounded-2xl border border-emerald-400/30 text-center pointer-events-auto">
+                            <p class="text-xs font-mono-tech text-cyan-300 mb-2">DOOR SEALED: Interior Low-Pass Resonance Active (380 Hz)</p>
+                            <button onclick="window.fridgeApp.toggleDoor(true)" class="px-4 py-2 bg-cyan-400 text-slate-950 font-display font-bold text-xs rounded-lg hover:bg-white transition cursor-pointer">
+                                PULL CHROME HANDLE TO OPEN
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- RUBBER DOOR SEAL GASKET (Clickable Instrument #7) -->
+                    <div id="comp-doorseal" data-instrument="doorseal" class="instrument-zone mb-2.5 px-3 py-1.5 rounded-xl bg-slate-900/90 border-2 border-dashed border-emerald-500/40 hover:border-cyan-400 flex items-center justify-between cursor-pointer transition group">
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm">〰️</span>
+                            <span class="font-mono-tech text-[11px] text-emerald-200 group-hover:text-cyan-300 font-medium">7. MAGNETIC DOOR SEAL GASKET</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="squeakSealBtn" class="px-2 py-0.5 rounded bg-emerald-800/70 hover:bg-cyan-400 hover:text-slate-950 text-[10px] font-mono-tech text-emerald-100 transition">RUBBER BASS SQUEAK</button>
+                        </div>
+                    </div>
+
+                    <!-- 1. FREEZER COMPARTMENT & 2. ICE MAKER -->
+                    <div id="comp-freezer" data-instrument="freezer" class="instrument-zone freezer-bay rounded-2xl p-3.5 mb-3 transition cursor-pointer">
+                        <!-- Frost Particle Canvas Overlay -->
+                        <canvas id="frostCanvas" class="absolute inset-0 w-full h-full pointer-events-none opacity-65"></canvas>
+
+                        <div class="relative z-10 flex justify-between items-center mb-2.5">
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-300/50 font-mono-tech text-[10px] text-cyan-200 font-bold">1. FREEZER CLOUD</span>
+                                <button id="shimmerBellBtn" class="px-2 py-0.5 rounded bg-cyan-400/20 hover:bg-cyan-300 hover:text-slate-950 text-cyan-100 text-[10px] font-mono-tech border border-cyan-300/40 transition">CRYSTAL BELL</button>
+                            </div>
+                            <div class="flex items-center gap-1.5" id="comp-icemaker" data-instrument="icemaker">
+                                <span class="font-mono-tech text-[10px] text-cyan-300 font-semibold">2. ICE MAKER:</span>
+                                <button id="iceSeqToggleBtn" class="px-2.5 py-0.5 rounded bg-cyan-950/90 hover:bg-cyan-400 hover:text-slate-950 text-cyan-300 border border-cyan-400/50 font-mono-tech text-[10px] font-bold transition">
+                                    IDM AUTO: OFF
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Interactive Ice Cube Tray (8 Tuned Modal / FM Crystalline Cubes) -->
+                        <div class="relative z-10 grid grid-cols-4 sm:grid-cols-8 gap-2 pt-1" id="iceCubeTray">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- 3. FRIDGE LIGHT & 4. REFRIGERATOR HUM -->
+                    <div class="grid grid-cols-12 gap-2.5 mb-3">
+                        <!-- Warm / Cyan Fridge Bulb -->
+                        <div id="comp-light" data-instrument="light" class="instrument-zone col-span-7 bg-gradient-to-r from-amber-500/20 via-yellow-300/15 to-cyan-400/20 border border-amber-300/40 hover:border-amber-300 rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition">
+                            <div class="flex items-center gap-2.5">
+                                <div id="bulbVisual" class="w-8 h-8 rounded-full bg-amber-300 flex items-center justify-center text-slate-950 font-bold shadow-[0_0_20px_#fbbf24] transition-all">
+                                    💡
+                                </div>
+                                <div>
+                                    <div class="font-mono-tech text-[11px] font-bold text-amber-200">3. FRIDGE LIGHT</div>
+                                    <div class="text-[10px] text-amber-100/70 font-mono-tech">Additive Luminous Chime</div>
+                                </div>
+                            </div>
+                            <button id="chimeBurstBtn" class="px-2 py-1 rounded bg-amber-400/20 hover:bg-amber-300 hover:text-slate-950 text-amber-200 border border-amber-300/40 font-mono-tech text-[10px] transition">PING</button>
+                        </div>
+
+                        <!-- Ambient Refrigerator Hum Toggle -->
+                        <div id="comp-hum" data-instrument="hum" class="instrument-zone col-span-5 bg-emerald-950/80 border border-emerald-500/30 hover:border-emerald-400 rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition">
+                            <div>
+                                <div class="font-mono-tech text-[11px] font-bold text-emerald-200">4. FRIDGE HUM</div>
+                                <div class="text-[10px] text-emerald-400/70 font-mono-tech">60Hz Beating Drone</div>
+                            </div>
+                            <button id="humDroneToggleBtn" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 font-mono-tech text-xs font-bold hover:bg-emerald-400 hover:text-slate-950 transition">
+                                ON
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 5. BOTTLE SHELF (Tuned Glass Modal Resonators - Drag Up/Down to fill liquid) -->
+                    <div id="comp-bottles" data-instrument="bottles" class="instrument-zone bg-slate-950/50 rounded-2xl p-3 pb-2 mb-3 border border-cyan-500/20 hover:border-cyan-400/50 transition">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="font-mono-tech text-[11px] font-bold text-cyan-200">5. TUNED BOTTLE SHELF (CLICK OR DRAG LIQUID LEVEL)</span>
+                            <button id="strumBottlesBtn" class="px-2 py-0.5 rounded bg-cyan-500/20 hover:bg-cyan-400 hover:text-slate-950 text-cyan-200 font-mono-tech text-[10px] border border-cyan-400/30 transition">ARPEGGIATE GLASS</button>
+                        </div>
+
+                        <!-- 6 Interactive Glass Bottles -->
+                        <div id="bottleRack" class="grid grid-cols-6 gap-2 items-end pt-2 px-2 h-36">
+                            <!-- Populated by JS -->
+                        </div>
+                        <div class="glass-shelf rounded-full mt-0.5"></div>
+                    </div>
+
+                    <!-- 6. DEFROST DRIP TRAY & CRISPER DRAWER -->
+                    <div id="comp-defrost" data-instrument="defrost" class="instrument-zone bg-gradient-to-b from-cyan-950/60 to-slate-950/90 rounded-xl p-3 mb-3 border border-cyan-400/30 hover:border-cyan-300 cursor-pointer transition">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2.5">
+                                <span class="text-lg">💧</span>
+                                <div>
+                                    <div class="font-mono-tech text-[11px] font-bold text-cyan-200">6. DEFROST DRIP EVAPORATOR</div>
+                                    <div class="text-[10px] font-mono-tech text-cyan-300/70">Crackling Frost Vinyl &amp; Filtered Water Droplets</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button id="dripTriggerBtn" class="px-2.5 py-1 rounded bg-cyan-500/20 hover:bg-cyan-400 hover:text-slate-950 text-cyan-200 font-mono-tech text-[10px] border border-cyan-400/40 transition">DROPLET</button>
+                                <button id="defrostNoiseToggleBtn" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-cyan-400 hover:text-slate-950 text-cyan-300 font-mono-tech text-[10px] border border-cyan-500/30 transition">HISS: OFF</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 8. COMPRESSOR MOTOR BAY (BOTTOM GRILLE) -->
+                    <div id="comp-compressor" data-instrument="compressor" class="instrument-zone bg-[#09100e] rounded-2xl p-3.5 border-2 border-amber-500/40 hover:border-amber-400 transition cursor-pointer relative overflow-hidden">
+                        <!-- Industrial Ventilation Louvers -->
+                        <div class="flex justify-between items-center relative z-10">
+                            <div class="flex items-center gap-3">
+                                <div id="compressorCoreVisual" class="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500/30 to-rose-600/30 border border-amber-400/60 flex items-center justify-center text-xl shadow-inner">
+                                    ⚙️
+                                </div>
+                                <div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="font-mono-tech text-xs font-bold text-amber-300">8. ROTARY COMPRESSOR</span>
+                                        <span id="compressorStatusTag" class="px-1.5 py-0.5 text-[9px] font-mono-tech bg-amber-500/20 text-amber-300 rounded border border-amber-400/30">IDLE</span>
+                                    </div>
+                                    <div class="text-[10px] font-mono-tech text-emerald-300/70">Subharmonic FM Motor &amp; Mechanical Wobble</div>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-3">
+                                <!-- Mini Compressor Throttle Dial -->
+                                <div class="text-right">
+                                    <label class="block text-[9px] font-mono-tech text-amber-200/80 uppercase">Motor RPM</label>
+                                    <input id="compressorThrottle" type="range" min="18" max="140" value="48" class="w-20 accent-amber-400 cursor-pointer">
+                                </div>
+                                <button id="compressorToggleBtn" class="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-400 hover:text-slate-950 text-amber-300 border border-amber-400/50 font-mono-tech text-xs font-bold transition shadow">
+                                    ENGAGE
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div><!-- /fridgeCavity -->
+
+                <!-- PLAYFUL MACRO ACTION BAR BELOW FRIDGE DOOR -->
+                <div class="mt-3.5 grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                    <button id="macroFreezeBtn" class="py-2 px-2 rounded-xl bg-cyan-950/90 hover:bg-cyan-400 hover:text-slate-950 text-cyan-200 border border-cyan-400/40 font-mono-tech text-[10px] font-bold transition shadow flex flex-col items-center gap-0.5 cursor-pointer">
+                        <span>🧊 FREEZE</span>
+                        <span class="text-[8px] opacity-75">LOCK BUFFER</span>
+                    </button>
+                    <button id="macroDefrostBtn" class="py-2 px-2 rounded-xl bg-amber-950/90 hover:bg-amber-400 hover:text-slate-950 text-amber-200 border border-amber-400/40 font-mono-tech text-[10px] font-bold transition shadow flex flex-col items-center gap-0.5 cursor-pointer">
+                        <span>🔥 DEFROST</span>
+                        <span class="text-[8px] opacity-75">MELT PITCH</span>
+                    </button>
+                    <button id="macroHauntedBtn" class="py-2 px-2 rounded-xl bg-purple-950/90 hover:bg-purple-400 hover:text-slate-950 text-purple-200 border border-purple-400/40 font-mono-tech text-[10px] font-bold transition shadow flex flex-col items-center gap-0.5 cursor-pointer">
+                        <span>👻 HAUNTED</span>
+                        <span class="text-[8px] opacity-75">POLTERGEIST</span>
+                    </button>
+                    <button id="macroStrangeBtn" class="py-2 px-2 rounded-xl bg-emerald-950/90 hover:bg-emerald-400 hover:text-slate-950 text-emerald-200 border border-emerald-400/40 font-mono-tech text-[10px] font-bold transition shadow flex flex-col items-center gap-0.5 cursor-pointer">
+                        <span>🛸 STRANGE</span>
+                        <span class="text-[8px] opacity-75">MUTATE DSP</span>
+                    </button>
+                    <button id="macroShakeBtn" class="col-span-2 sm:col-span-1 py-2 px-2 rounded-xl bg-rose-950/90 hover:bg-rose-400 hover:text-slate-950 text-rose-200 border border-rose-400/40 font-mono-tech text-[10px] font-bold transition shadow flex flex-col items-center gap-0.5 cursor-pointer">
+                        <span>💥 SHAKE</span>
+                        <span class="text-[8px] opacity-75">CRASH COILS</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- CENTER COLUMN: DSP SYNTHESIS MATRIX, VISUALIZER & KEYBOARD (4 COLS) -->
+        <section class="lg:col-span-4 flex flex-col gap-4">
+
+            <!-- OSCILLOSCOPE + FFT SPECTRUM DUAL DISPLAY -->
+            <div class="enamel-dark rounded-2xl p-4 border border-emerald-500/25 relative overflow-hidden">
+                <div class="flex justify-between items-center mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+                        <span class="font-mono-tech text-xs font-bold text-cyan-300 tracking-wider" id="activeInstrumentHeader">ACTIVE MODULE: COMPRESSOR</span>
+                    </div>
+                    <div class="flex gap-1.5">
+                        <button id="visModeWave" class="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 font-mono-tech text-[10px]">SCOPE + FFT</button>
+                        <button id="triggerTestNoteBtn" class="px-2.5 py-0.5 rounded bg-emerald-500/30 hover:bg-emerald-400 hover:text-slate-950 text-emerald-200 font-mono-tech text-[10px] font-bold transition">PULSE VOICE</button>
+                    </div>
+                </div>
+
+                <!-- Real-Time Canvas -->
+                <div class="relative rounded-xl overflow-hidden bg-[#050b09] border border-emerald-500/30 h-40">
+                    <canvas id="scopeCanvas" class="w-full h-full block"></canvas>
+                    <div class="absolute bottom-2 left-3 right-3 flex justify-between text-[10px] font-mono-tech text-emerald-400/70 pointer-events-none">
+                        <span id="dspReadoutLeft">FM RATIO: 1.414 | SUB: -1 OCT</span>
+                        <span id="dspReadoutRight">DOOR FILTER: 18.5 kHz</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 8 COMPONENT SELECTOR TABS & PRESETS -->
+            <div class="enamel-dark rounded-2xl p-4 border border-emerald-500/25">
+                <div class="flex justify-between items-center mb-2.5">
+                    <span class="font-mono-tech text-xs text-emerald-300 font-bold uppercase tracking-wider">Refrigerator Component Matrix</span>
+                    <select id="presetSelect" class="bg-emerald-950 text-cyan-300 font-mono-tech text-xs px-2.5 py-1 rounded-lg border border-emerald-500/40 focus:outline-none">
+                        <option value="default">Preset: Factory Cryo</option>
+                        <option value="subzero">Preset: Sub-Zero Crystalline</option>
+                        <option value="rusty1958">Preset: Rusty 1958 Kelvinator</option>
+                        <option value="freonleak">Preset: Freon Gas Leak</option>
+                        <option value="midnightmilk">Preset: Midnight Glass Milk</option>
+                        <option value="hyperidm">Preset: Hyper-Glitch Ice Maker</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-4 gap-1.5" id="instrumentSelectorGrid">
+                    <button data-inst="compressor" class="inst-tab active-tab px-2 py-2 rounded-lg font-mono-tech text-[11px] bg-cyan-500/20 text-cyan-200 border border-cyan-400/60 text-left transition">
+                        <div class="font-bold">⚙️ COMPR</div>
+                        <div class="text-[9px] opacity-75">FM Drone</div>
+                    </button>
+                    <button data-inst="freezer" class="inst-tab px-2 py-2 rounded-lg font-mono-tech text-[11px] bg-emerald-950/60 text-emerald-300 border border-emerald-500/20 text-left transition">
+                        <div class="font-bold">❄️ FREEZE</div>
+                        <div class="text-[9px] opacity-75">Granular</div>
+                    </button>
+                    <button data-inst="icemaker" class="inst-tab px-2 py-2 rounded-lg font-mono-tech text-[11px] bg-emerald-950/60 text-emerald-300 border border-emerald-500/20 text-left transition">
+                        <div class="font-bold">🧊 ICEMKR</div>
+                        <div class="text-[9px] opacity-75">IDM Glitch</div>
+                    </button>
+                    <button data-inst="hum" class="inst-tab px-2 py-2 rounded-lg font-mono-tech text-[11px] bg-emerald-950/60 text-emerald-300 border border-emerald-500/20 text-left transition">
+                        <div class="font-bold">〰️ HUM</div>
+                        <div class="text-[9px] opacity-75">Beat Osc</div>
+                    </button>
+                    <button data-inst="bottles" class="inst-tab px-2 py-2 rounded-lg font-mono-tech text-[11px] bg-emerald-950/60 text-emerald-300 border border-emerald-500/20 text-left transition">
+                        <div class="font-bold">🍾 BOTTLE</div>
+                        <div class="text-[9px] opacity-75">Modal Glass</div>
+                    </button>
+                    <button data-inst="defrost" class="inst-tab px-2 py-2 rounded-lg font-mono-tech text-[11px] bg-emerald-950/60 text-emerald-300 border border-emerald-500/20 text-left transition">
+                        <div class="font-bold">💧 DEFROST</div>
+                        <div class="text-[9px] opacity-75">Drip Crackle</div>
+                    </button>
+                    <button data-inst="doorseal" class="inst-tab px-2 py-2 rounded-lg font-mono-tech text-[11px] bg-emerald-950/60 text-emerald-300 border border-emerald-500/20 text-left transition">
+                        <div class="font-bold">🚪 SEAL</div>
+                        <div class="text-[9px] opacity-75">Rubber Bass</div>
+                    </button>
+                    <button data-inst="light" class="inst-tab px-2 py-2 rounded-lg font-mono-tech text-[11px] bg-emerald-950/60 text-emerald-300 border border-emerald-500/20 text-left transition">
+                        <div class="font-bold">💡 LIGHT</div>
+                        <div class="text-[9px] opacity-75">Add Chime</div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 8 TACTILE ROTARY SYNTHESIS KNOBS -->
+            <div class="enamel-dark rounded-2xl p-4 border border-emerald-500/25">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="font-mono-tech text-xs font-bold text-emerald-300 uppercase tracking-wider">Tactile DSP Parameters (Drag Up/Down)</span>
+                    <button id="randomizeKnobsBtn" class="px-2.5 py-0.5 rounded bg-emerald-800/60 hover:bg-cyan-400 hover:text-slate-950 text-cyan-200 font-mono-tech text-[10px] transition">RANDOMIZE PATCH</button>
+                </div>
+
+                <div class="grid grid-cols-4 gap-y-4 gap-x-2" id="knobRack">
+                    <!-- Populated dynamically by JS for smooth rotary drag -->
+                </div>
+            </div>
+
+            <!-- POLYPHONIC KEYBOARD & MIDI CONTROLLER -->
+            <div class="enamel-dark rounded-2xl p-4 border border-emerald-500/25">
+                <div class="flex justify-between items-center mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="font-mono-tech text-xs font-bold text-emerald-300">POLYPHONIC KEYBOARD</span>
+                        <span class="text-[10px] font-mono-tech text-cyan-300/80">[Keys A-L / W-P]</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="midiStatusText" class="text-[10px] font-mono-tech text-emerald-400/70">MIDI: READY</span>
+                        <select id="octaveSelect" class="bg-emerald-950 text-cyan-300 font-mono-tech text-[11px] px-2 py-0.5 rounded border border-emerald-500/30">
+                            <option value="2">Octave 2 (Sub)</option>
+                            <option value="3">Octave 3 (Low)</option>
+                            <option value="4" selected>Octave 4 (Mid)</option>
+                            <option value="5">Octave 5 (Ice)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 13-Key Synth Keyboard -->
+                <div id="pianoKeyboard" class="relative h-24 flex gap-1 select-none pt-1">
+                    <!-- Rendered by JS -->
+                </div>
+            </div>
+
+        </section>
+
+        <!-- RIGHT COLUMN: GENERATIVE SEQUENCER, FX RACK & AUDIOPHILE WAV EXPORT (3 COLS) -->
+        <section class="lg:col-span-3 flex flex-col gap-4">
+
+            <!-- GENERATIVE CRYO-SEQUENCER -->
+            <div class="enamel-dark rounded-2xl p-4 border border-emerald-500/25">
+                <div class="flex justify-between items-center mb-3">
+                    <div>
+                        <h2 class="font-mono-tech text-xs font-bold text-cyan-300 uppercase tracking-wider">Generative Ice &amp; Drip Sequencer</h2>
+                        <p class="text-[10px] font-mono-tech text-emerald-400/70">16-Step Euclidean / Probabilistic Clock</p>
+                    </div>
+                    <button id="seqPlayToggleBtn" class="px-3.5 py-1.5 rounded-xl bg-cyan-400 text-slate-950 font-display font-bold text-xs hover:bg-white transition shadow-[0_0_15px_rgba(0,245,255,0.4)] cursor-pointer">
+                        ▶ START SEQ
+                    </button>
+                </div>
+
+                <!-- 16 Step Grid -->
+                <div id="sequencerGrid" class="grid grid-cols-8 gap-1.5 mb-3">
+                    <!-- Populated by JS -->
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 text-xs font-mono-tech">
+                    <div>
+                        <div class="flex justify-between text-[10px] text-emerald-300 mb-1">
+                            <span>TEMPO (BPM)</span>
+                            <span id="bpmReadout">118 BPM</span>
+                        </div>
+                        <input id="bpmSlider" type="range" min="45" max="200" value="118" class="w-full accent-cyan-400 cursor-pointer">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[10px] text-emerald-300 mb-1">
+                            <span>GLITCH DENSITY</span>
+                            <span id="densityReadout">65%</span>
+                        </div>
+                        <input id="densitySlider" type="range" min="10" max="100" value="65" class="w-full accent-emerald-400 cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <!-- MASTER CRYO-EFFECTS RACK -->
+            <div class="enamel-dark rounded-2xl p-4 border border-emerald-500/25">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="font-mono-tech text-xs font-bold text-emerald-300 uppercase tracking-wider">Cryo-Acoustic Space &amp; FX</span>
+                    <span id="freezeBufferBadge" class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/30 font-mono-tech text-[10px]">NORMAL FLOW</span>
+                </div>
+
+                <div class="space-y-2.5 font-mono-tech text-xs">
+                    <div>
+                        <div class="flex justify-between text-[10px] text-emerald-200 mb-0.5">
+                            <span>PING-PONG DELAY FEEDBACK</span>
+                            <span id="delayValText">35%</span>
+                        </div>
+                        <input id="fxDelaySlider" type="range" min="0" max="88" value="35" class="w-full accent-cyan-400 cursor-pointer">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[10px] text-emerald-200 mb-0.5">
+                            <span>DELAY TIME (SYNC/MS)</span>
+                            <span id="delayTimeText">280 ms</span>
+                        </div>
+                        <input id="fxDelayTimeSlider" type="range" min="40" max="750" value="280" class="w-full accent-cyan-400 cursor-pointer">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[10px] text-emerald-200 mb-0.5">
+                            <span>FROZEN CAVITY REVERB MIX</span>
+                            <span id="reverbValText">42%</span>
+                        </div>
+                        <input id="fxReverbSlider" type="range" min="0" max="100" value="42" class="w-full accent-emerald-400 cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <!-- AUDIOPHILE STUDIO WAV EXPORT & BATCH GENERATOR -->
+            <div class="enamel-dark rounded-2xl p-4 border-2 border-cyan-500/30 shadow-xl">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h2 class="font-display font-bold text-sm text-white tracking-wide">AUDIOPHILE WAV EXPORT</h2>
+                        <p class="text-[10px] font-mono-tech text-cyan-300/80">Offline DSP Render • True 24-Bit Packing</p>
+                    </div>
+                    <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono-tech text-[10px] border border-emerald-400/40">LOSSLESS</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5 mb-3 font-mono-tech text-xs">
+                    <div>
+                        <label class="block text-[10px] text-emerald-300/80 mb-1">BIT DEPTH</label>
+                        <select id="exportBitDepth" class="w-full bg-emerald-950 text-cyan-200 px-2.5 py-1.5 rounded-lg border border-emerald-500/40">
+                            <option value="16">16-Bit PCM WAV</option>
+                            <option value="24" selected>24-Bit PCM WAV (Pro)</option>
+                            <option value="32">32-Bit IEEE Float</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-emerald-300/80 mb-1">SAMPLE RATE</label>
+                        <select id="exportSampleRate" class="w-full bg-emerald-950 text-cyan-200 px-2.5 py-1.5 rounded-lg border border-emerald-500/40">
+                            <option value="44100">44.1 kHz (CD)</option>
+                            <option value="48000" selected>48.0 kHz (Studio)</option>
+                            <option value="96000">96.0 kHz (Hi-Res)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5 mb-3 font-mono-tech text-xs">
+                    <div>
+                        <label class="block text-[10px] text-emerald-300/80 mb-1">DURATION + TAIL</label>
+                        <select id="exportDuration" class="w-full bg-emerald-950 text-cyan-200 px-2.5 py-1.5 rounded-lg border border-emerald-500/40">
+                            <option value="2.5">2.5s One-Shot + Tail</option>
+                            <option value="4.5" selected>4.5s Evolving Texture</option>
+                            <option value="8.0">8.0s Extended Drone</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col justify-end pb-1">
+                        <label class="inline-flex items-center gap-2 cursor-pointer text-[11px] text-emerald-200">
+                            <input id="exportNormalize" type="checkbox" checked class="accent-cyan-400 rounded">
+                            <span>Peak Normalize (-0.3dB)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Single Offline WAV Render Button -->
+                <button id="renderWavBtn" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-white hover:to-cyan-200 text-slate-950 font-display font-bold text-xs tracking-wider shadow-lg transition mb-2.5 cursor-pointer flex items-center justify-center gap-2">
+                    <span>⬇ RENDER &amp; DOWNLOAD WAV</span>
+                </button>
+
+                <!-- Batch Sample Pack ZIP Generator -->
+                <div class="pt-2.5 border-t border-emerald-500/20">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-[10px] font-mono-tech text-emerald-300">BATCH SAMPLE PACK (.ZIP):</span>
+                        <select id="batchCountSelect" class="bg-emerald-950 text-cyan-300 font-mono-tech text-[11px] px-2 py-0.5 rounded border border-emerald-500/40">
+                            <option value="5">5 Sounds</option>
+                            <option value="10" selected>10 Sounds</option>
+                            <option value="20">20 Sounds</option>
+                            <option value="50">50 Sounds</option>
+                        </select>
+                    </div>
+                    <button id="batchZipBtn" class="w-full py-2 px-3 rounded-xl bg-emerald-950/90 hover:bg-emerald-800 text-cyan-200 border border-cyan-400/40 font-mono-tech text-xs font-semibold transition cursor-pointer">
+                        📦 GENERATE BATCH ZIP + METADATA
+                    </button>
+                    <div id="exportProgressBox" class="hidden mt-2">
+                        <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden">
+                            <div id="exportProgressBar" class="bg-cyan-400 h-full w-0 transition-all duration-150"></div>
+                        </div>
+                        <div id="exportProgressLabel" class="text-[10px] font-mono-tech text-cyan-300 mt-1 text-center">Rendering...</div>
+                    </div>
+                </div>
+
+                <!-- Save / Load JSON Patch -->
+                <div class="mt-3 pt-2.5 border-t border-emerald-500/20 flex gap-2">
+                    <button id="savePresetJsonBtn" class="flex-1 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-500/30 font-mono-tech text-[10px] transition">SAVE .JSON PATCH</button>
+                    <label class="flex-1 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/30 font-mono-tech text-[10px] text-center cursor-pointer transition">
+                        LOAD .JSON PATCH
+                        <input id="loadPresetInput" type="file" accept=".json" class="hidden">
+                    </label>
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- APPLICATION ENGINE SCRIPT -->
+    <script type="module" src="/src/app.js"></script>
+</body>
+</html>
