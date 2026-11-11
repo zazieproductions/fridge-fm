@@ -140,8 +140,27 @@ window.JSZip = JSZip;
                     if (this.ctx.state === 'suspended') await this.ctx.resume();
                     return;
                 }
+                // Concurrent callers must share a single boot. Previously a second call
+                // returned early while the graph was still being built, so the caller
+                // went on to connect voices to a still-null voiceBus.
+                if (this._initPromise) return this._initPromise;
+                this._initPromise = this.bootGraph();
+                const ready = this._initPromise;
+                try {
+                    await ready;
+                } finally {
+                    if (this._initPromise === ready) this._initPromise = null;
+                }
+            }
+
+            async bootGraph() {
                 const AudioCtx = window.AudioContext || window.webkitAudioContext;
-                this.ctx = new AudioCtx({ sampleRate: 48000 });
+                // Some devices reject a forced sample rate; fall back to the hardware default.
+                try {
+                    this.ctx = new AudioCtx({ sampleRate: 48000, latencyHint: 'interactive' });
+                } catch (err) {
+                    this.ctx = new AudioCtx({ latencyHint: 'interactive' });
+                }
 
                 // Load Custom Cryo-Crackle & Granular Frost AudioWorklet
                 await this.registerCryoWorklet(this.ctx);
@@ -149,6 +168,12 @@ window.JSZip = JSZip;
                 // Master Chain: VoiceBus -> Saturation -> DoorFilter -> FX(Delay + Reverb) -> DynamicsCompressor -> MasterGain -> Analyser -> Destination
                 this.voiceBus = this.ctx.createGain();
                 this.voiceBus.gain.value = 0.9;
+
+                // Sequencer-only sub-bus: lets PANIC mute notes the lookahead
+                // scheduler has already committed to the audio clock.
+                this.seqBus = this.ctx.createGain();
+                this.seqBus.gain.value = 1;
+                this.seqBus.connect(this.voiceBus);
 
                 this.driveNode = this.ctx.createWaveShaper();
                 this.updateDriveCurve(state.params.drive);
@@ -549,6 +574,21 @@ window.JSZip = JSZip;
                 const baseFreq = freq * pitchMultiplier * (1 + drift);
                 const decayTime = 0.15 + params.decay * 2.4;
 
+                // CRYO SHIMMER: brittle high partial layered into every voice. The
+                // cryoMix knob was previously wired to nothing at all.
+                const shimmerOsc = ctx.createOscillator();
+                const shimmerGain = ctx.createGain();
+                const shimmerDur = 0.3 + params.decay * 1.1;
+                shimmerOsc.type = 'sine';
+                shimmerOsc.frequency.setValueAtTime(Math.max(1800, baseFreq * 4.07), now);
+                shimmerGain.gain.setValueAtTime(0.0001, now);
+                shimmerGain.gain.linearRampToValueAtTime(Math.max(0.0001, params.cryoMix * 0.16 * velocity), now + 0.004);
+                shimmerGain.gain.exponentialRampToValueAtTime(0.0001, now + shimmerDur);
+                shimmerOsc.connect(shimmerGain);
+                shimmerGain.connect(panNode);
+                shimmerOsc.start(now);
+                shimmerOsc.stop(now + shimmerDur + 0.02);
+
                 switch (instrument) {
                     case 'compressor': {
                         // Deep Industrial FM Subharmonic Voice
@@ -849,9 +889,13 @@ window.JSZip = JSZip;
                 // Downward glissando across active drones and 6 melting droplets
                 if (this.compressorDrone) {
                     const c = this.compressorDrone.carrier.frequency;
+                    // Glide back to the RPM-derived pitch afterwards: the melt used to
+                    // leave the drone stranded at 24 Hz.
+                    const runningHz = Math.max(20, state.compressorRPM * (1.1 - (state.thermostat / 100) * 0.25));
                     c.cancelScheduledValues(now);
                     c.setValueAtTime(c.value * 1.6, now);
                     c.exponentialRampToValueAtTime(24, now + 2.2);
+                    c.exponentialRampToValueAtTime(runningHz, now + 3.6);
                 }
                 for (let i = 0; i < 8; i++) {
                     const t = now + i * 0.12;
@@ -1206,6 +1250,9 @@ window.JSZip = JSZip;
                 wrap.addEventListener('pointerup', (e) => {
                     if (!dragging) return;
                     dragging = false;
+                    // A plain click should strike the bottle once, not twice: only
+                    // re-strike when the drag actually retuned the liquid level.
+                    if (Math.abs(state.bottleLevels[idx] - startLevel) < 0.004) return;
                     const finalFreq = 220 + (1 - state.bottleLevels[idx]) * 720;
                     synth.triggerInstrumentVoice({
                         instrument: 'bottles',
@@ -1361,47 +1408,108 @@ window.JSZip = JSZip;
         }
 
         // =========================================================================
-        // 8. GENERATIVE SEQUENCER CLOCK LOOP
+        // 8. GENERATIVE SEQUENCER CLOCK LOOP (Web Audio lookahead scheduler)
         // =========================================================================
+        // The timer only *wakes up* to commit upcoming steps to the audio clock ahead
+        // of time, so step spacing is exact instead of inheriting setInterval's
+        // main-thread jitter (which used to swing the groove around under load).
+        const SEQ_LOOKAHEAD = 0.12;   // seconds of steps committed in advance
+        const SEQ_TICK_MS = 25;       // how often the scheduler wakes up
         let seqInterval = null;
-        function startSequencerLoop() {
-            if (seqInterval) clearInterval(seqInterval);
-            const stepMs = (60 / state.bpm / 4) * 1000;
-            seqInterval = setInterval(() => {
-                if (!state.seqPlaying && !state.iceMakerAuto) return;
-                ensureAudioReady();
+        let seqNextStepTime = 0;
+        let seqGeneration = 0;
+        let seqBusClosed = false;
+        const seqUiTimers = new Set();
 
-                const step = state.currentStep;
-                // Highlight current step
-                for (let i = 0; i < 16; i++) {
-                    const el = document.getElementById(`seqStep-${i}`);
-                    if (el) {
-                        el.classList.toggle('ring-2', i === step);
-                        el.classList.toggle('ring-white', i === step);
-                    }
-                }
+        function seqStepSeconds() {
+            return 60 / state.bpm / 4; // 16th notes
+        }
 
-                const activeStep = state.seqSteps[step];
-                const prob = (state.density / 100);
-                if (activeStep && state.rng.next() <= prob) {
-                    const instPool = state.iceMakerAuto
-                        ? ['icemaker', 'freezer', 'bottles', 'defrost']
-                        : [state.activeInstrument, 'icemaker', 'bottles'];
-                    const chosenInst = state.rng.choice(instPool);
-                    const scaleSemis = [0, 3, 5, 7, 10, 12, 15, 19];
-                    const semi = state.rng.choice(scaleSemis);
-                    const midi = (state.octave + 1) * 12 + semi;
-                    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+        function highlightSeqStep(step) {
+            for (let i = 0; i < 16; i++) {
+                const el = document.getElementById(`seqStep-${i}`);
+                if (!el) continue;
+                el.classList.toggle('ring-2', i === step);
+                el.classList.toggle('ring-white', i === step);
+            }
+        }
 
-                    synth.triggerInstrumentVoice({
-                        instrument: chosenInst,
-                        freq,
-                        velocity: 0.65 + state.rng.next() * 0.35
-                    });
-                }
+        function scheduleSeqStep(step, when, generation) {
+            const activeStep = state.seqSteps[step];
+            const prob = (state.density / 100);
+            if (activeStep && state.rng.next() <= prob) {
+                const instPool = state.iceMakerAuto
+                    ? ['icemaker', 'freezer', 'bottles', 'defrost']
+                    : [state.activeInstrument, 'icemaker', 'bottles'];
+                const chosenInst = state.rng.choice(instPool);
+                const scaleSemis = [0, 3, 5, 7, 10, 12, 15, 19];
+                const semi = state.rng.choice(scaleSemis);
+                const midi = (state.octave + 1) * 12 + semi;
+                const freq = 440 * Math.pow(2, (midi - 69) / 12);
 
+                synth.triggerInstrumentVoice({
+                    instrument: chosenInst,
+                    freq,
+                    time: when,
+                    velocity: 0.65 + state.rng.next() * 0.35,
+                    destination: synth.seqBus
+                });
+            }
+
+            // Light the step when it is actually heard, not when it was queued.
+            const leadMs = Math.max(0, (when - synth.ctx.currentTime) * 1000);
+            const timer = setTimeout(() => {
+                seqUiTimers.delete(timer);
+                if (generation === seqGeneration) highlightSeqStep(step);
+            }, leadMs);
+            seqUiTimers.add(timer);
+        }
+
+        function stepSequencer() {
+            if (!state.seqPlaying && !state.iceMakerAuto) {
+                seqNextStepTime = 0;
+                return;
+            }
+            const ctx = synth.ctx;
+            if (!ctx || !synth.seqBus) return;
+            const horizon = ctx.currentTime + SEQ_LOOKAHEAD;
+            // Recover from a stalled timer (throttled tab, GC pause) without firing a
+            // burst of late notes.
+            if (seqNextStepTime < ctx.currentTime) seqNextStepTime = ctx.currentTime + 0.02;
+            while (seqNextStepTime < horizon) {
+                scheduleSeqStep(state.currentStep, seqNextStepTime, seqGeneration);
                 state.currentStep = (state.currentStep + 1) % 16;
-            }, stepMs);
+                seqNextStepTime += seqStepSeconds();
+            }
+        }
+
+        function startSequencerLoop() {
+            if (seqInterval) return; // idempotent; tempo is read per scheduled step
+            seqInterval = setInterval(stepSequencer, SEQ_TICK_MS);
+        }
+
+        // Open/close the sequencer bus without a click. Kept closed after a stop or
+        // PANIC so notes already committed to the audio clock never come back.
+        function setSeqBusOpen(open) {
+            const ctx = synth.ctx;
+            if (!ctx || !synth.seqBus) return;
+            const now = ctx.currentTime;
+            seqBusClosed = !open;
+            synth.seqBus.gain.cancelScheduledValues(now);
+            synth.seqBus.gain.setTargetAtTime(open ? 1 : 0, now, 0.004);
+        }
+
+        // Drop everything queued and mute the notes the scheduler already committed.
+        function flushSequencerSchedule() {
+            seqGeneration++;
+            seqNextStepTime = 0;
+            for (const timer of seqUiTimers) clearTimeout(timer);
+            seqUiTimers.clear();
+            for (let i = 0; i < 16; i++) {
+                const el = document.getElementById(`seqStep-${i}`);
+                if (el) el.classList.remove('ring-2', 'ring-white');
+            }
+            setSeqBusOpen(false);
         }
 
         // =========================================================================
@@ -1421,12 +1529,28 @@ window.JSZip = JSZip;
                 vy: 0.2 + Math.random() * 0.6
             }));
 
+            // Reused across frames and only reallocated on resize: assigning
+            // canvas.width/height every frame reallocating buffers plus two fresh
+            // typed arrays per frame caused GC churn that can disturb audio.
+            let freqData = null;
+            let timeData = null;
+            let scopeW = 0;
+            let scopeH = 0;
+            let frostW = 0;
+            let frostH = 0;
+
             function renderFrame() {
                 requestAnimationFrame(renderFrame);
 
                 // 1. Render Scope & FFT
-                const w = scopeCanvas.width = scopeCanvas.clientWidth * window.devicePixelRatio;
-                const h = scopeCanvas.height = scopeCanvas.clientHeight * window.devicePixelRatio;
+                const nextW = Math.round(scopeCanvas.clientWidth * window.devicePixelRatio);
+                const nextH = Math.round(scopeCanvas.clientHeight * window.devicePixelRatio);
+                if (nextW !== scopeW || nextH !== scopeH) {
+                    scopeW = scopeCanvas.width = nextW;
+                    scopeH = scopeCanvas.height = nextH;
+                }
+                const w = scopeW;
+                const h = scopeH;
                 sCtx.fillStyle = '#050b09';
                 sCtx.fillRect(0, 0, w, h);
 
@@ -1441,9 +1565,10 @@ window.JSZip = JSZip;
                 }
 
                 if (synth.analyser) {
-                    const freqLen = synth.analyser.frequencyBinCount;
-                    const freqData = new Uint8Array(freqLen);
-                    const timeData = new Uint8Array(freqLen);
+                    if (!freqData || freqData.length !== synth.analyser.frequencyBinCount) {
+                        freqData = new Uint8Array(synth.analyser.frequencyBinCount);
+                        timeData = new Uint8Array(synth.analyser.frequencyBinCount);
+                    }
                     synth.analyser.getByteFrequencyData(freqData);
                     synth.analyser.getByteTimeDomainData(timeData);
 
@@ -1477,8 +1602,14 @@ window.JSZip = JSZip;
                 }
 
                 // 2. Render Freezer Frost Particles
-                const fw = frostCanvas.width = frostCanvas.clientWidth;
-                const fh = frostCanvas.height = frostCanvas.clientHeight;
+                const nextFw = frostCanvas.clientWidth;
+                const nextFh = frostCanvas.clientHeight;
+                if (nextFw !== frostW || nextFh !== frostH) {
+                    frostW = frostCanvas.width = nextFw;
+                    frostH = frostCanvas.height = nextFh;
+                }
+                const fw = frostW;
+                const fh = frostH;
                 fCtx.clearRect(0, 0, fw, fh);
                 const frostDensity = state.thermostat / 100;
                 fCtx.fillStyle = `rgba(165, 243, 252, ${0.25 + frostDensity * 0.55})`;
@@ -1502,11 +1633,18 @@ window.JSZip = JSZip;
         // =========================================================================
         async function ensureAudioReady() {
             if (!state.powered) {
-                await synth.init();
-                state.powered = true;
+                try {
+                    await synth.init();
+                    state.powered = true;
+                } catch (err) {
+                    // Never leave the user stuck behind the boot overlay with no feedback.
+                    setStatus(`AUDIO ENGINE ERROR // ${err.message}`);
+                    return;
+                }
                 document.getElementById('bootOverlay').classList.add('opacity-0', 'pointer-events-none');
                 const badge = document.getElementById('audioStatusBadge');
-                badge.textContent = '48kHz DSP ONLINE';
+                // Report the rate the context actually runs at, not the requested one.
+                badge.textContent = `${Math.round(synth.ctx.sampleRate / 100) / 10}kHz DSP ONLINE`;
                 badge.classList.replace('text-cyan-300', 'text-emerald-300');
             } else if (synth.ctx && synth.ctx.state === 'suspended') {
                 await synth.ctx.resume();
@@ -1526,6 +1664,22 @@ window.JSZip = JSZip;
             }
             if (right) {
                 right.textContent = state.doorOpen ? 'DOOR OPEN: 19.0 kHz' : 'DOOR SEALED: 380 Hz LP';
+            }
+        }
+
+        function renderThermostatUI() {
+            const celsius = (10 - (state.thermostat / 100) * 32).toFixed(1);
+            const zoneLabel = state.thermostat > 75 ? 'CRYOGENIC' : state.thermostat > 40 ? 'CHILLED' : 'WARM DRIFT';
+            document.getElementById('tempReadout').textContent = `${celsius} °C (${zoneLabel})`;
+
+            // Shift interior fridge light glow from warm amber to cryo cyan
+            const cavity = document.getElementById('fridgeCavity');
+            if (state.thermostat > 68) {
+                cavity.style.setProperty('--fridge-light-color', 'rgba(0, 245, 255, 0.26)');
+                cavity.style.setProperty('--fridge-glow', 'rgba(0, 245, 255, 0.25)');
+            } else {
+                cavity.style.setProperty('--fridge-light-color', 'rgba(255, 214, 138, 0.28)');
+                cavity.style.setProperty('--fridge-glow', 'rgba(255, 185, 60, 0.2)');
             }
         }
 
@@ -1585,19 +1739,7 @@ window.JSZip = JSZip;
             document.getElementById('thermostatSlider').addEventListener('input', (e) => {
                 ensureAudioReady();
                 state.thermostat = Number(e.target.value);
-                const celsius = (10 - (state.thermostat / 100) * 32).toFixed(1);
-                const zoneLabel = state.thermostat > 75 ? 'CRYOGENIC' : state.thermostat > 40 ? 'CHILLED' : 'WARM DRIFT';
-                document.getElementById('tempReadout').textContent = `${celsius} °C (${zoneLabel})`;
-
-                // Shift interior fridge light glow from warm amber to cryo cyan
-                const cavity = document.getElementById('fridgeCavity');
-                if (state.thermostat > 68) {
-                    cavity.style.setProperty('--fridge-light-color', 'rgba(0, 245, 255, 0.26)');
-                    cavity.style.setProperty('--fridge-glow', 'rgba(0, 245, 255, 0.25)');
-                } else {
-                    cavity.style.setProperty('--fridge-light-color', 'rgba(255, 214, 138, 0.28)');
-                    cavity.style.setProperty('--fridge-glow', 'rgba(255, 185, 60, 0.2)');
-                }
+                renderThermostatUI();
                 synth.updateThermostatDSP();
             });
 
@@ -1623,9 +1765,21 @@ window.JSZip = JSZip;
                 }
             });
             document.getElementById('panicMuteBtn').addEventListener('click', () => {
+                // Generative sources have to stop as well, otherwise the sequencer
+                // re-triggers notes a fraction of a second after "SILENCE".
+                flushSequencerSchedule();
+                state.seqPlaying = false;
+                state.iceMakerAuto = false;
+                const seqBtn = document.getElementById('seqPlayToggleBtn');
+                seqBtn.textContent = '▶ START SEQ';
+                seqBtn.classList.remove('bg-amber-400');
+                seqBtn.classList.add('bg-cyan-400');
+                const iceBtn = document.getElementById('iceSeqToggleBtn');
+                iceBtn.textContent = 'IDM AUTO: OFF';
+                iceBtn.classList.remove('bg-cyan-400', 'text-slate-950');
                 synth.silenceAll();
                 updateContinuousButtonsUI();
-                setStatus('ALL CONTINUOUS DRONES & BUFFERS SILENCED');
+                setStatus('ALL DRONES, SEQUENCER & BUFFERS SILENCED');
             });
 
             // 8 Component Selector Tabs
@@ -1641,7 +1795,10 @@ window.JSZip = JSZip;
             // Clicking directly on Refrigerator Compartments
             document.querySelectorAll('.instrument-zone').forEach(zone => {
                 zone.addEventListener('click', (e) => {
-                    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+                    // Ignore clicks on controls that handle their own interaction, including
+                    // clicks on their inner <span> labels, otherwise a bottle or ice cube
+                    // strike also fires the compartment voice (two overlapping notes).
+                    if (e.target.closest('button, input, select, .glass-bottle, .ice-cube')) return;
                     ensureAudioReady();
                     const inst = zone.dataset.instrument;
                     if (inst) {
@@ -1653,9 +1810,9 @@ window.JSZip = JSZip;
             });
 
             // Dedicated Compartment Buttons
-            document.getElementById('shimmerBellBtn').addEventListener('click', (e) => {
+            document.getElementById('shimmerBellBtn').addEventListener('click', async (e) => {
                 e.stopPropagation();
-                ensureAudioReady();
+                await ensureAudioReady();
                 selectInstrument('freezer');
                 [783.99, 1046.5, 1567.98].forEach((f, i) => {
                     synth.triggerInstrumentVoice({ instrument: 'freezer', freq: f, time: synth.ctx.currentTime + i * 0.05, velocity: 0.85 });
@@ -1670,13 +1827,15 @@ window.JSZip = JSZip;
                 btn.textContent = state.iceMakerAuto ? 'IDM AUTO: ON' : 'IDM AUTO: OFF';
                 btn.classList.toggle('bg-cyan-400', state.iceMakerAuto);
                 btn.classList.toggle('text-slate-950', state.iceMakerAuto);
+                if (state.iceMakerAuto || state.seqPlaying) setSeqBusOpen(true);
+                else flushSequencerSchedule();
             });
 
-            document.getElementById('chimeBurstBtn').addEventListener('click', (e) => {
+            document.getElementById('chimeBurstBtn').addEventListener('click', async (e) => {
                 e.stopPropagation();
-                ensureAudioReady();
+                await ensureAudioReady();
                 selectInstrument('light');
-                constbulbEffect();
+                bulbEffect();
                 [523.25, 659.25, 987.77, 1318.5].forEach((f, idx) => {
                     synth.triggerInstrumentVoice({ instrument: 'light', freq: f, time: synth.ctx.currentTime + idx * 0.06, velocity: 0.8 });
                 });
@@ -1689,9 +1848,9 @@ window.JSZip = JSZip;
                 updateContinuousButtonsUI();
             });
 
-            document.getElementById('strumBottlesBtn').addEventListener('click', (e) => {
+            document.getElementById('strumBottlesBtn').addEventListener('click', async (e) => {
                 e.stopPropagation();
-                ensureAudioReady();
+                await ensureAudioReady();
                 selectInstrument('bottles');
                 state.bottleLevels.forEach((lvl, idx) => {
                     const freq = 220 + (1 - lvl) * 720;
@@ -1815,6 +1974,8 @@ window.JSZip = JSZip;
                 e.currentTarget.textContent = state.seqPlaying ? '⏹ STOP SEQ' : '▶ START SEQ';
                 e.currentTarget.classList.toggle('bg-amber-400', state.seqPlaying);
                 e.currentTarget.classList.toggle('bg-cyan-400', !state.seqPlaying);
+                if (state.seqPlaying || state.iceMakerAuto) setSeqBusOpen(true);
+                else flushSequencerSchedule();
             });
 
             document.getElementById('bpmSlider').addEventListener('input', (e) => {
@@ -2017,7 +2178,7 @@ window.JSZip = JSZip;
                 const zipName = `FRIDGE_FM_${count}_SAMPLE_PACK_${bitDepth}bit_${state.seed}.zip`;
                 downloadBlob(zipBlob, zipName);
                 progLbl.textContent = `Downloaded ${zipName}`;
-                setStatus(`BATCH EXPORT COMPLETE // ${count}Lossless WAVs + Metadata in ${zipName}`);
+                setStatus(`BATCH EXPORT COMPLETE // ${count} Lossless WAVs + Metadata in ${zipName}`);
                 setTimeout(() => progBox.classList.add('hidden'), 3000);
             });
 
@@ -2095,7 +2256,7 @@ window.JSZip = JSZip;
             hissBtn.classList.toggle('text-slate-950', state.defrostHissRunning);
         }
 
-        function constbulbEffect() {
+        function bulbEffect() {
             const bulb = document.getElementById('bulbVisual');
             bulb.classList.add('scale-125', 'bg-white');
             setTimeout(() => bulb.classList.remove('scale-125', 'bg-white'), 220);
@@ -2124,5 +2285,7 @@ window.JSZip = JSZip;
         startSequencerLoop();
         startVisualizers();
         updateScopeReadout();
+        // Sync the readout/glow with the slider's initial value on load.
+        renderThermostatUI();
 
     })();
